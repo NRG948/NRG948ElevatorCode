@@ -10,6 +10,7 @@ import com.revrobotics.CANSparkBase.IdleMode;
 import com.revrobotics.CANSparkLowLevel.MotorType;
 
 import edu.wpi.first.math.controller.ElevatorFeedforward;
+import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.trajectory.TrapezoidProfile;
 import edu.wpi.first.wpilibj.Timer;
@@ -35,12 +36,19 @@ public class Elevator extends SubsystemBase {
   private static final double KA = 12 / MAX_ACCELERATION;
   private static final double KG = 9.81 * KA;
 
+  //feedback constants
+  private static final double KP = 1.0;
+  private static final double KI = 0;
+  private static final double KD = 0;
+
   private CANSparkMax motor = new CANSparkMax(0, MotorType.kBrushless);
   private RelativeEncoder encoder = motor.getEncoder();
 
   private final ElevatorFeedforward feedForward = new ElevatorFeedforward(KS, KG, KV, KA);
   private final TrapezoidProfile profile = new TrapezoidProfile(CONSTRAINTS);
   private final Timer timer = new Timer();
+
+  private final ProfiledPIDController feedBack = new ProfiledPIDController(KP, KI, KD, CONSTRAINTS);
 
   private boolean isSeekingGoal;
   private final TrapezoidProfile.State currentState = new TrapezoidProfile.State();
@@ -81,6 +89,7 @@ public class Elevator extends SubsystemBase {
     if (isSeekingGoal) {
       TrapezoidProfile.State desiredState = profile.calculate(timer.get(), currentState, goalState);
       double voltage = feedForward.calculate(currentState.velocity, desiredState.velocity, 0.020);
+      voltage += feedBack.calculate(currentState.position, desiredState);
       motor.setVoltage(voltage);
     }
     // This method will be called once per scheduler run
