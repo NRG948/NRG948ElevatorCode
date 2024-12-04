@@ -6,6 +6,8 @@ package frc.robot.subsystems;
 
 import com.revrobotics.CANSparkMax;
 import com.revrobotics.RelativeEncoder;
+import com.revrobotics.SparkLimitSwitch;
+import com.revrobotics.CANDigitalInput.LimitSwitchPolarity;
 import com.revrobotics.CANSparkBase.IdleMode;
 import com.revrobotics.CANSparkLowLevel.MotorType;
 
@@ -43,6 +45,8 @@ public class Elevator extends SubsystemBase {
 
   private CANSparkMax motor = new CANSparkMax(0, MotorType.kBrushless);
   private RelativeEncoder encoder = motor.getEncoder();
+  private SparkLimitSwitch upperLimit = motor.getForwardLimitSwitch(LimitSwitchPolarity.kNormallyOpen);
+  private SparkLimitSwitch lowerLimit = motor.getReverseLimitSwitch(LimitSwitchPolarity.kNormallyOpen);
 
   private final ElevatorFeedforward feedForward = new ElevatorFeedforward(KS, KG, KV, KA);
   private final TrapezoidProfile profile = new TrapezoidProfile(CONSTRAINTS);
@@ -53,6 +57,8 @@ public class Elevator extends SubsystemBase {
   private boolean isSeekingGoal;
   private final TrapezoidProfile.State currentState = new TrapezoidProfile.State();
   private final TrapezoidProfile.State goalState = new TrapezoidProfile.State();
+  private boolean atUpperLimit;
+  private boolean atLowerLimit;
 
   /** Creates a new Elevator. */
   public Elevator() {
@@ -81,6 +87,8 @@ public class Elevator extends SubsystemBase {
   private void updateSensorState() {
     currentState.position = encoder.getPosition();
     currentState.velocity = encoder.getVelocity();
+    atUpperLimit = upperLimit.isPressed();
+    atLowerLimit = lowerLimit.isPressed();
   }
 
   @Override
@@ -90,6 +98,12 @@ public class Elevator extends SubsystemBase {
       TrapezoidProfile.State desiredState = profile.calculate(timer.get(), currentState, goalState);
       double voltage = feedForward.calculate(currentState.velocity, desiredState.velocity, 0.020);
       voltage += feedBack.calculate(currentState.position, desiredState);
+      if ((voltage > 0 && atUpperLimit)) {
+        voltage = KG;
+      }
+      if ((voltage < 0 && atLowerLimit)) {
+        voltage = 0;
+      }
       motor.setVoltage(voltage);
     }
     // This method will be called once per scheduler run
