@@ -1,0 +1,11 @@
+{
+  "NTProvider": {
+    "types": {
+      "/FMSInfo": "FMSInfo",
+      "/SmartDashboard/Elevator Sim": "Mechanism2d"
+    }
+  },
+  "NetworkTables Info": {
+    "visible": true
+  }
+}

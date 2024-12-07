@@ -15,7 +15,16 @@ import edu.wpi.first.math.controller.ElevatorFeedforward;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.trajectory.TrapezoidProfile;
+import edu.wpi.first.wpilibj.RobotBase;
+import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj.simulation.DCMotorSim;
+import edu.wpi.first.wpilibj.simulation.ElevatorSim;
+import edu.wpi.first.wpilibj.simulation.EncoderSim;
+import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
+import edu.wpi.first.wpilibj.smartdashboard.MechanismLigament2d;
+import edu.wpi.first.wpilibj.smartdashboard.MechanismRoot2d;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 public class Elevator extends SubsystemBase {
@@ -48,6 +57,12 @@ public class Elevator extends SubsystemBase {
   private SparkLimitSwitch upperLimit = motor.getForwardLimitSwitch(LimitSwitchPolarity.kNormallyOpen);
   private SparkLimitSwitch lowerLimit = motor.getReverseLimitSwitch(LimitSwitchPolarity.kNormallyOpen);
 
+  private ElevatorSim simElevator = new ElevatorSim(MOTOR_PARAMS, GEAR_RATIO, MASS, SPROCKET_DIAMETER/2, 0, 1, true, 0);
+
+  private Mechanism2d mechanism2d = new Mechanism2d(0.5, 1.0);
+  private MechanismRoot2d mechanismRoot2d = mechanism2d.getRoot("Elevator Root", 0, 0);
+  private MechanismLigament2d elevatorMech2d = mechanismRoot2d.append(new MechanismLigament2d("Elevator", 0, 90));
+
   private final ElevatorFeedforward feedForward = new ElevatorFeedforward(KS, KG, KV, KA);
   private final TrapezoidProfile profile = new TrapezoidProfile(CONSTRAINTS);
   private final Timer timer = new Timer();
@@ -59,6 +74,7 @@ public class Elevator extends SubsystemBase {
   private final TrapezoidProfile.State goalState = new TrapezoidProfile.State();
   private boolean atUpperLimit;
   private boolean atLowerLimit;
+  private double currentVoltage;
 
   /** Creates a new Elevator. */
   public Elevator() {
@@ -67,6 +83,7 @@ public class Elevator extends SubsystemBase {
     encoder.setPositionConversionFactor(METERS_PER_REVOLUTION);
     encoder.setVelocityConversionFactor(METERS_PER_REVOLUTION);
     updateSensorState();
+    SmartDashboard.putData("Elevator Sim", mechanism2d);
   }
   
   public void disable() {
@@ -85,10 +102,16 @@ public class Elevator extends SubsystemBase {
   }
 
   private void updateSensorState() {
-    currentState.position = encoder.getPosition();
-    currentState.velocity = encoder.getVelocity();
+    if (RobotBase.isReal()){
+      currentState.position = encoder.getPosition();
+      currentState.velocity = encoder.getVelocity();
+    } else {
+      currentState.position = simElevator.getPositionMeters();
+      currentState.velocity = simElevator.getVelocityMetersPerSecond();
+    }
     atUpperLimit = upperLimit.isPressed();
     atLowerLimit = lowerLimit.isPressed();
+    elevatorMech2d.setLength(currentState.position);
   }
 
   @Override
@@ -96,16 +119,20 @@ public class Elevator extends SubsystemBase {
     updateSensorState();
     if (isSeekingGoal) {
       TrapezoidProfile.State desiredState = profile.calculate(timer.get(), currentState, goalState);
-      double voltage = feedForward.calculate(currentState.velocity, desiredState.velocity, 0.020);
-      voltage += feedBack.calculate(currentState.position, desiredState);
-      if ((voltage > 0 && atUpperLimit)) {
-        voltage = KG;
+      currentVoltage = feedForward.calculate(currentState.velocity, desiredState.velocity, 0.020);
+      currentVoltage += feedBack.calculate(currentState.position, desiredState);
+      if ((currentVoltage > 0 && atUpperLimit)) {
+        currentVoltage = KG;
       }
-      if ((voltage < 0 && atLowerLimit)) {
-        voltage = 0;
+      if ((currentVoltage < 0 && atLowerLimit)) {
+        currentVoltage = 0;
       }
-      motor.setVoltage(voltage);
+      motor.setVoltage(currentVoltage);
     }
-    // This method will be called once per scheduler run
+  }
+  @Override
+  public void simulationPeriodic(){
+    simElevator.setInput(currentVoltage);
+    simElevator.update(0.020);
   }
 }
