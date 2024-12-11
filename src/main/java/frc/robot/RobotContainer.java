@@ -43,7 +43,7 @@ public class RobotContainer {
    */
   private void configureBindings() {
     m_driverController.povUp().onTrue(Commands.runOnce(() -> elevator.setGoalPosition(1.0), elevator));
-    m_driverController.povUp().onTrue(Commands.runOnce(() -> elevator.setGoalPosition(0), elevator));
+    m_driverController.povDown().onTrue(Commands.runOnce(() -> elevator.setGoalPosition(0), elevator));
   }
 
   /**

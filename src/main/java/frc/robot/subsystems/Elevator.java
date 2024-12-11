@@ -4,23 +4,22 @@
 
 package frc.robot.subsystems;
 
+import com.revrobotics.CANSparkBase.IdleMode;
+import com.revrobotics.CANSparkLowLevel.MotorType;
 import com.revrobotics.CANSparkMax;
 import com.revrobotics.RelativeEncoder;
 import com.revrobotics.SparkLimitSwitch;
-import com.revrobotics.CANDigitalInput.LimitSwitchPolarity;
-import com.revrobotics.CANSparkBase.IdleMode;
-import com.revrobotics.CANSparkLowLevel.MotorType;
 
 import edu.wpi.first.math.controller.ElevatorFeedforward;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.trajectory.TrapezoidProfile;
+import edu.wpi.first.util.datalog.BooleanLogEntry;
+import edu.wpi.first.util.datalog.DoubleLogEntry;
+import edu.wpi.first.wpilibj.DataLogManager;
 import edu.wpi.first.wpilibj.RobotBase;
-import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.Timer;
-import edu.wpi.first.wpilibj.simulation.DCMotorSim;
 import edu.wpi.first.wpilibj.simulation.ElevatorSim;
-import edu.wpi.first.wpilibj.simulation.EncoderSim;
 import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
 import edu.wpi.first.wpilibj.smartdashboard.MechanismLigament2d;
 import edu.wpi.first.wpilibj.smartdashboard.MechanismRoot2d;
@@ -37,7 +36,7 @@ public class Elevator extends SubsystemBase {
 
   //trapezoid profile values
   private static final DCMotor MOTOR_PARAMS = DCMotor.getKrakenX60(1);
-  private static final double MAX_SPEED = (MOTOR_PARAMS.freeSpeedRadPerSec * SPROCKET_DIAMETER) / GEAR_RATIO; //m/s
+  private static final double MAX_SPEED = (MOTOR_PARAMS.freeSpeedRadPerSec * SPROCKET_DIAMETER) / (GEAR_RATIO * 2 * Math.PI); //m/s
   private static final double MAX_ACCELERATION = (2 * MOTOR_PARAMS.stallTorqueNewtonMeters * GEAR_RATIO) / (SPROCKET_DIAMETER * MASS); //m/s^2
   private static final TrapezoidProfile.Constraints CONSTRAINTS = new TrapezoidProfile.Constraints(MAX_SPEED, MAX_ACCELERATION);
 
@@ -54,10 +53,18 @@ public class Elevator extends SubsystemBase {
 
   private CANSparkMax motor = new CANSparkMax(0, MotorType.kBrushless);
   private RelativeEncoder encoder = motor.getEncoder();
-  private SparkLimitSwitch upperLimit = motor.getForwardLimitSwitch(LimitSwitchPolarity.kNormallyOpen);
-  private SparkLimitSwitch lowerLimit = motor.getReverseLimitSwitch(LimitSwitchPolarity.kNormallyOpen);
+  private SparkLimitSwitch upperLimit = motor.getForwardLimitSwitch(SparkLimitSwitch.Type.kNormallyOpen);
+  private SparkLimitSwitch lowerLimit = motor.getReverseLimitSwitch(SparkLimitSwitch.Type.kNormallyOpen);
 
-  private ElevatorSim simElevator = new ElevatorSim(MOTOR_PARAMS, GEAR_RATIO, MASS, SPROCKET_DIAMETER/2, 0, 1, true, 0);
+  private ElevatorSim simElevator = new ElevatorSim(
+    MOTOR_PARAMS, 
+    GEAR_RATIO, 
+    MASS, 
+    SPROCKET_DIAMETER/2, 
+    0, 
+    1, 
+    true, 
+    0);
 
   private Mechanism2d mechanism2d = new Mechanism2d(0.5, 1.0);
   private MechanismRoot2d mechanismRoot2d = mechanism2d.getRoot("Elevator Root", 0, 0);
@@ -76,6 +83,21 @@ public class Elevator extends SubsystemBase {
   private boolean atLowerLimit;
   private double currentVoltage;
 
+  private BooleanLogEntry logIsSeekingGoal = new BooleanLogEntry(DataLogManager.getLog(), "Elevator/isSeekingGoal");
+  private DoubleLogEntry logCurrentVelocity = new DoubleLogEntry(DataLogManager.getLog(), "Elevator/currentVelocity");
+  private DoubleLogEntry logCurrentPosition = new DoubleLogEntry(DataLogManager.getLog(), "Elevator/currentPosition");
+  private DoubleLogEntry logGoalVelocity = new DoubleLogEntry(DataLogManager.getLog(), "Elevator/goalVelocity");
+  private DoubleLogEntry logGoalPosition = new DoubleLogEntry(DataLogManager.getLog(), "Elevator/goalPosition");
+  private DoubleLogEntry logCurrentVoltage = new DoubleLogEntry(DataLogManager.getLog(), "Elevator/currentVoltage");
+  private DoubleLogEntry logFeedForward = new DoubleLogEntry(DataLogManager.getLog(), "Elevator/FeedForward");
+  private DoubleLogEntry logPIDOutput = new DoubleLogEntry(DataLogManager.getLog(), "Elevator/pidOutput");
+  private BooleanLogEntry logAtUpperLimit = new BooleanLogEntry(DataLogManager.getLog(), "Elevator/atUpperLimit");
+  private BooleanLogEntry logAtLowerLimit = new BooleanLogEntry(DataLogManager.getLog(), "Elevator/atLowerLimit");
+  private DoubleLogEntry logDesiredPosition = new DoubleLogEntry(DataLogManager.getLog(), "Elevator/desiredPosition");
+  private DoubleLogEntry logDesiredVelocity = new DoubleLogEntry(DataLogManager.getLog(), "Elevator/desiredVelocity");
+
+  
+
   /** Creates a new Elevator. */
   public Elevator() {
     motor.setIdleMode(IdleMode.kBrake);
@@ -90,6 +112,7 @@ public class Elevator extends SubsystemBase {
     motor.disable();
     isSeekingGoal = false;
     timer.stop();
+    logIsSeekingGoal.append(false);
   }
 
   public void setGoalPosition(double pos) {
@@ -98,6 +121,9 @@ public class Elevator extends SubsystemBase {
     isSeekingGoal = true;
     goalState.position = pos;
     goalState.velocity = 0;
+    logIsSeekingGoal.append(true);
+    logGoalPosition.append(pos);
+    logGoalVelocity.append(0);
 
   }
 
@@ -112,6 +138,10 @@ public class Elevator extends SubsystemBase {
     atUpperLimit = upperLimit.isPressed();
     atLowerLimit = lowerLimit.isPressed();
     elevatorMech2d.setLength(currentState.position);
+    logCurrentPosition.append(currentState.position);
+    logCurrentVelocity.append(currentState.velocity);
+    logAtLowerLimit.append(atLowerLimit);
+    logAtUpperLimit.append(atUpperLimit);
   }
 
   @Override
@@ -119,8 +149,13 @@ public class Elevator extends SubsystemBase {
     updateSensorState();
     if (isSeekingGoal) {
       TrapezoidProfile.State desiredState = profile.calculate(timer.get(), currentState, goalState);
-      currentVoltage = feedForward.calculate(currentState.velocity, desiredState.velocity, 0.020);
-      currentVoltage += feedBack.calculate(currentState.position, desiredState);
+      logDesiredPosition.append(desiredState.position);
+      logDesiredVelocity.append(desiredState.velocity);
+      double feedforward = feedForward.calculate(desiredState.velocity);
+      logFeedForward.append(feedforward);
+      double pidOutput = feedBack.calculate(currentState.position, desiredState);
+      logPIDOutput.append(pidOutput);
+      currentVoltage = feedforward + pidOutput;
       if ((currentVoltage > 0 && atUpperLimit)) {
         currentVoltage = KG;
       }
@@ -128,11 +163,12 @@ public class Elevator extends SubsystemBase {
         currentVoltage = 0;
       }
       motor.setVoltage(currentVoltage);
+      logCurrentVoltage.append(currentVoltage);
     }
   }
   @Override
   public void simulationPeriodic(){
-    simElevator.setInput(currentVoltage);
+    simElevator.setInputVoltage(currentVoltage);
     simElevator.update(0.020);
   }
 }
